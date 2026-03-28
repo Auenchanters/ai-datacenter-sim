@@ -11,9 +11,9 @@ Usage:
     python run_benchmark.py
 
 Setup:
-    1. Copy config/.env.example to .env in the root directory.
+    1. Copy config/.env.example to .env in the project root.
     2. Fill in your three OpenRouter API keys.
-    3. Install dependencies: pip install -r requirements.txt
+    3. pip install -r requirements.txt
 
 Output:
     - Leaderboard printed to terminal.
@@ -22,8 +22,10 @@ Output:
 """
 
 import os
-from dotenv import load_dotenv
+import litellm
+litellm.suppress_debug_info = True
 
+from dotenv import load_dotenv
 load_dotenv()
 
 from benchmark.runner import run_single_agent
@@ -33,15 +35,21 @@ from agents.llm_agent import LLMAgent
 
 # ------------------------------------------------------------
 # MODEL CONFIGURATION
-# Each entry maps an OpenRouter model string to the .env
-# variable that holds the API key for that model.
-# Add or remove entries to change who competes.
+#
+# Reliable free models on OpenRouter as of March 2026:
+#   openrouter/qwen/qwq-32b:free            - strong reasoning
+#   openrouter/deepseek/deepseek-r1:free    - strong reasoning
+#   openrouter/qwen/qwen3-coder:free        - good for structured JSON
+#   openrouter/minimax/minimax-m2.5:free    - fast responses
+#
+# Each entry maps a model string to the .env variable
+# that holds the API key for that model.
 # ------------------------------------------------------------
 
 MODELS = [
     {
-        "model": "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
-        "api_key_env": "OPENROUTER_API_KEY_NEMOTRON",
+        "model": "openrouter/qwen/qwq-32b:free",
+        "api_key_env": "OPENROUTER_API_KEY_NEMOTRON",  # reuse existing key slot
     },
     {
         "model": "openrouter/minimax/minimax-m2.5:free",
@@ -53,20 +61,11 @@ MODELS = [
     },
 ]
 
-# Number of simulation ticks each model will play.
-# 50 ticks is good for a quick test. 100 ticks is the full benchmark.
 TICKS = 100
-
-# Random seed for workload generation.
-# Keep this the same across all runs for fair comparison.
 SEED = 42
-
-# Whether to inject dynamic challenge events (price spikes, hardware failures).
-# Set to False for a clean baseline run with no surprises.
 ENABLE_EVENTS = True
-
-# Whether to print per-tick output for each model.
 VERBOSE = True
+TIMEOUT_SECONDS = 60  # per LLM call; free models can be slow
 
 
 # ------------------------------------------------------------
@@ -82,6 +81,7 @@ if __name__ == "__main__":
     print(f"  Ticks   : {TICKS}")
     print(f"  Seed    : {SEED}")
     print(f"  Events  : {ENABLE_EVENTS}")
+    print(f"  Timeout : {TIMEOUT_SECONDS}s per call")
     print("=" * 60)
 
     if not MODELS:
@@ -107,6 +107,7 @@ if __name__ == "__main__":
             agent_id=f"agent_{i:02d}",
             model_name=model_name,
             api_key=api_key,
+            timeout=TIMEOUT_SECONDS,
         )
 
         result = run_single_agent(
@@ -118,10 +119,10 @@ if __name__ == "__main__":
         )
 
         results.append(result)
-        print(f"  Completed in {result['elapsed_seconds']}s")
+        print(f"  Completed in {result['elapsed_seconds']}s | Errors: {result['agent_errors']}")
 
     if not results:
-        print("No agents completed. Check your .env file.")
+        print("\nNo agents completed. Check your .env file.")
         exit(1)
 
     results.sort(key=lambda r: r["final_pue"])
