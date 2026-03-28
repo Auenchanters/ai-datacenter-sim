@@ -22,6 +22,8 @@ class LLMAgent(BaseAgent):
 
     Each agent instance carries its own api_key so multiple agents
     with different keys can run in the same process without conflict.
+    The key is passed explicitly on every call — litellm global state
+    is never used so parallel agents cannot bleed keys into each other.
 
     NOTE: We intentionally do NOT pass response_format={"type": "json_object"}
     because free-tier models on OpenRouter do not support it and silently
@@ -48,7 +50,15 @@ class LLMAgent(BaseAgent):
                 "litellm is not installed. Run: pip install litellm"
             )
 
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+        # Prefer explicitly passed key; do NOT fall back to a shared global env var
+        # so that parallel agents each use their own dedicated key.
+        self.api_key = api_key
+        if not self.api_key:
+            raise ValueError(
+                f"[{agent_id}] No API key provided for model '{model_name}'. "
+                f"Pass api_key= explicitly or set the correct env var in .env."
+            )
+
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
@@ -90,10 +100,10 @@ class LLMAgent(BaseAgent):
             "max_tokens": self.max_tokens,
             # DO NOT add response_format here - it breaks free-tier OpenRouter models
             "timeout": self.timeout,
+            # Always pass the key explicitly per-call so parallel agents
+            # never share or overwrite each other's credentials via litellm globals.
+            "api_key": self.api_key,
         }
-
-        if self.api_key:
-            call_kwargs["api_key"] = self.api_key
 
         if self.base_url:
             call_kwargs["base_url"] = self.base_url
