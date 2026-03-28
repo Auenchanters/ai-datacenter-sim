@@ -1,6 +1,5 @@
 import json
 from economy.catalog import get_catalog_for_prompt
-from economy.workloads import WorkloadSpawner
 
 
 BASE_SYSTEM_PROMPT = """
@@ -49,7 +48,7 @@ RESPONSE FORMAT
 {
   "thoughts": "brief reasoning (1-2 sentences max)",
   "actions": [
-    {"action": "BUY_EQUIPMENT", "item_id": "server_basic", "x": 2, "y": 2, "facing": "NORTH"},
+    {"action": "BUY_EQUIPMENT", "item_id": "SERVER_CPU_BASIC", "x": 2, "y": 2, "facing": "NORTH"},
     {"action": "SET_COOLING", "equipment_id": "cooler_01", "fan_speed": 0.6}
   ]
 }
@@ -57,5 +56,5 @@ RESPONSE FORMAT
 
 
 def build_system_prompt() -> str:
-    catalog_text = get_catalog_for_prompt()
+    catalog_text = json.dumps(get_catalog_for_prompt(), indent=2)
     return BASE_SYSTEM_PROMPT.strip() + "\n\nHARDWARE CATALOG:\n" + catalog_text
