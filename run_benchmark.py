@@ -36,11 +36,15 @@ from agents.llm_agent import LLMAgent
 # ------------------------------------------------------------
 # MODEL CONFIGURATION
 #
-# Reliable free models on OpenRouter as of March 2026:
-#   openrouter/qwen/qwq-32b:free            - strong reasoning
-#   openrouter/deepseek/deepseek-r1:free    - strong reasoning
-#   openrouter/qwen/qwen3-coder:free        - good for structured JSON
-#   openrouter/minimax/minimax-m2.5:free    - fast responses
+# Verified free models on OpenRouter as of March 2026:
+#   openrouter/nvidia/nemotron-3-super-120b-a12b:free  - 262K ctx, strong agents
+#   openrouter/qwen/qwen3-next-80b-a3b-instruct:free   - 262K ctx, agents/RAG
+#   openrouter/qwen/qwen3-coder:free                   - good structured JSON
+#   openrouter/mistral/devstral-2:free                 - 262K ctx, agentic coding
+#   openrouter/meta-llama/llama-3.3-70b-instruct:free  - 128K ctx, reliable
+#
+# NOTE: qwen/qwq-32b:free and minimax/minimax-m2.5:free have been
+# removed from OpenRouter's free tier (404 NotFoundError as of March 2026).
 #
 # Each entry maps a model string to the .env variable
 # that holds the API key for that model.
@@ -48,12 +52,12 @@ from agents.llm_agent import LLMAgent
 
 MODELS = [
     {
-        "model": "openrouter/qwen/qwq-32b:free",
-        "api_key_env": "OPENROUTER_API_KEY_NEMOTRON",  # reuse existing key slot
+        "model": "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+        "api_key_env": "OPENROUTER_API_KEY_NEMOTRON",
     },
     {
-        "model": "openrouter/minimax/minimax-m2.5:free",
-        "api_key_env": "OPENROUTER_API_KEY_MINIMAX",
+        "model": "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+        "api_key_env": "OPENROUTER_API_KEY_MINIMAX",  # reuse existing key slot
     },
     {
         "model": "openrouter/qwen/qwen3-coder:free",
