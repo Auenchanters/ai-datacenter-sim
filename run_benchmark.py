@@ -3,9 +3,8 @@ run_benchmark.py
 ----------------
 Entry point for running the full multi-model benchmark suite.
 
-Each model has its own dedicated OpenRouter API key stored as a
-separate environment variable. This allows three separate free-tier
-keys to be used simultaneously without hitting per-key rate limits.
+Agents run in PARALLEL - each has its own API key so there are no
+rate-limit conflicts. Total wall-clock time = slowest single agent.
 
 Usage:
     python run_benchmark.py
@@ -25,6 +24,7 @@ import os
 import litellm
 litellm.suppress_debug_info = True
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -38,16 +38,12 @@ from agents.llm_agent import LLMAgent
 #
 # Verified free models on OpenRouter as of March 2026:
 #   openrouter/nvidia/nemotron-3-super-120b-a12b:free  - 262K ctx, strong agents
-#   openrouter/qwen/qwen3-next-80b-a3b-instruct:free   - 262K ctx, agents/RAG
+#   openrouter/meta-llama/llama-3.3-70b-instruct:free  - 128K ctx, reliable & fast
 #   openrouter/qwen/qwen3-coder:free                   - good structured JSON
-#   openrouter/mistral/devstral-2:free                 - 262K ctx, agentic coding
-#   openrouter/meta-llama/llama-3.3-70b-instruct:free  - 128K ctx, reliable
+#   openrouter/mistral/devstral-2:free                 - 262K ctx, agentic
 #
-# NOTE: qwen/qwq-32b:free and minimax/minimax-m2.5:free have been
-# removed from OpenRouter's free tier (404 NotFoundError as of March 2026).
-#
-# Each entry maps a model string to the .env variable
-# that holds the API key for that model.
+# NOTE: qwen/qwq-32b:free and minimax/minimax-m2.5:free were removed
+# from OpenRouter's free tier as of March 2026 (404 NotFoundError).
 # ------------------------------------------------------------
 
 MODELS = [
@@ -57,7 +53,7 @@ MODELS = [
     },
     {
         "model": "openrouter/meta-llama/llama-3.3-70b-instruct:free",
-        "api_key_env": "OPENROUTER_API_KEY_MINIMAX",  # reuse existing key slot
+        "api_key_env": "OPENROUTER_API_KEY_MINIMAX",
     },
     {
         "model": "openrouter/qwen/qwen3-coder:free",
@@ -69,7 +65,46 @@ TICKS = 100
 SEED = 42
 ENABLE_EVENTS = True
 VERBOSE = True
-TIMEOUT_SECONDS = 60  # per LLM call; free models can be slow
+TIMEOUT_SECONDS = 60   # per LLM call
+MAX_TOKENS = 1024      # enough for a full action JSON; keeping low speeds up responses
+
+
+# ------------------------------------------------------------
+# WORKER
+# ------------------------------------------------------------
+
+def run_agent_worker(i: int, entry: dict) -> dict | None:
+    model_name = entry["model"]
+    api_key_env = entry["api_key_env"]
+    api_key = os.getenv(api_key_env)
+
+    if not api_key:
+        print(f"  [SKIP] {model_name}: missing env var '{api_key_env}'. Add it to .env and retry.")
+        return None
+
+    total = len(MODELS)
+    print(f"\n{'=' * 60}")
+    print(f"  Agent {i} of {total}: {model_name}")
+    print(f"{'=' * 60}")
+
+    agent = LLMAgent(
+        agent_id=f"agent_{i:02d}",
+        model_name=model_name,
+        api_key=api_key,
+        timeout=TIMEOUT_SECONDS,
+        max_tokens=MAX_TOKENS,
+    )
+
+    result = run_single_agent(
+        agent=agent,
+        ticks=TICKS,
+        seed=SEED,
+        enable_events=ENABLE_EVENTS,
+        verbose=VERBOSE,
+    )
+
+    print(f"  [{model_name}] Done in {result['elapsed_seconds']}s | Errors: {result['agent_errors']}")
+    return result
 
 
 # ------------------------------------------------------------
@@ -86,6 +121,7 @@ if __name__ == "__main__":
     print(f"  Seed    : {SEED}")
     print(f"  Events  : {ENABLE_EVENTS}")
     print(f"  Timeout : {TIMEOUT_SECONDS}s per call")
+    print(f"  Mode    : PARALLEL (all agents run simultaneously)")
     print("=" * 60)
 
     if not MODELS:
@@ -94,36 +130,15 @@ if __name__ == "__main__":
 
     results = []
 
-    for i, entry in enumerate(MODELS, start=1):
-        model_name = entry["model"]
-        api_key_env = entry["api_key_env"]
-        api_key = os.getenv(api_key_env)
-
-        if not api_key:
-            print(f"  [SKIP] {model_name}: missing env var '{api_key_env}'. Add it to .env and retry.")
-            continue
-
-        print(f"\n{'=' * 60}")
-        print(f"  Agent {i} of {len(MODELS)}: {model_name}")
-        print(f"{'=' * 60}")
-
-        agent = LLMAgent(
-            agent_id=f"agent_{i:02d}",
-            model_name=model_name,
-            api_key=api_key,
-            timeout=TIMEOUT_SECONDS,
-        )
-
-        result = run_single_agent(
-            agent=agent,
-            ticks=TICKS,
-            seed=SEED,
-            enable_events=ENABLE_EVENTS,
-            verbose=VERBOSE,
-        )
-
-        results.append(result)
-        print(f"  Completed in {result['elapsed_seconds']}s | Errors: {result['agent_errors']}")
+    with ThreadPoolExecutor(max_workers=len(MODELS)) as pool:
+        futures = {
+            pool.submit(run_agent_worker, i, entry): entry
+            for i, entry in enumerate(MODELS, start=1)
+        }
+        for future in as_completed(futures):
+            result = future.result()
+            if result is not None:
+                results.append(result)
 
     if not results:
         print("\nNo agents completed. Check your .env file.")
