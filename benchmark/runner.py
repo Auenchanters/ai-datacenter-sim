@@ -21,10 +21,15 @@ def run_single_agent(
     electricity_cost: float = 0.12,
     enable_events: bool = True,
     verbose: bool = True,
+    tick_delay: float = 0.0,
 ) -> Dict[str, Any]:
     """
     Runs a complete simulation for a single agent and returns its final score.
     Uses a fixed seed so results are reproducible and comparable across agents.
+
+    tick_delay: seconds to sleep after each tick's LLM call, used to stay
+                under OpenRouter's free-tier rate limit (8 RPM per model).
+                Set to 8.0 when running multiple parallel agents on free tier.
     """
     grid    = FacilityGrid(width=grid_width, height=grid_height)
     sim     = SimulationState(grid=grid, starting_budget=starting_budget, electricity_cost_per_kwh=electricity_cost)
@@ -53,6 +58,11 @@ def run_single_agent(
         )
 
         action_payload = agent.safe_decide(state)
+
+        # Rate-limit guard: pause after each LLM call so parallel agents
+        # don't exceed OpenRouter's free-tier 8 RPM cap.
+        if tick_delay > 0:
+            time.sleep(tick_delay)
 
         parse_results = parse_and_execute(
             action_payload=action_payload,

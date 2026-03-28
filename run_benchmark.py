@@ -68,6 +68,11 @@ VERBOSE = True
 TIMEOUT_SECONDS = 60   # per LLM call
 MAX_TOKENS = 1024      # enough for a full action JSON; keeping low speeds up responses
 
+# OpenRouter free tier allows 8 RPM per model.
+# With 3 parallel agents each making 1 call/tick, we need >= 7.5s between ticks.
+# Set to 8s for a small safety margin.
+TICK_DELAY_SECONDS = 8
+
 
 # ------------------------------------------------------------
 # WORKER
@@ -101,6 +106,7 @@ def run_agent_worker(i: int, entry: dict) -> dict | None:
         seed=SEED,
         enable_events=ENABLE_EVENTS,
         verbose=VERBOSE,
+        tick_delay=TICK_DELAY_SECONDS,
     )
 
     print(f"  [{model_name}] Done in {result['elapsed_seconds']}s | Errors: {result['agent_errors']}")
@@ -116,12 +122,13 @@ if __name__ == "__main__":
     print("=" * 60)
     print("  ai-datacenter-sim  |  Multi-Model Benchmark")
     print("=" * 60)
-    print(f"  Models  : {len(MODELS)}")
-    print(f"  Ticks   : {TICKS}")
-    print(f"  Seed    : {SEED}")
-    print(f"  Events  : {ENABLE_EVENTS}")
-    print(f"  Timeout : {TIMEOUT_SECONDS}s per call")
-    print(f"  Mode    : PARALLEL (all agents run simultaneously)")
+    print(f"  Models     : {len(MODELS)}")
+    print(f"  Ticks      : {TICKS}")
+    print(f"  Seed       : {SEED}")
+    print(f"  Events     : {ENABLE_EVENTS}")
+    print(f"  Timeout    : {TIMEOUT_SECONDS}s per call")
+    print(f"  Tick delay : {TICK_DELAY_SECONDS}s (rate-limit guard)")
+    print(f"  Mode       : PARALLEL (all agents run simultaneously)")
     print("=" * 60)
 
     if not MODELS:
