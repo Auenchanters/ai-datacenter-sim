@@ -16,26 +16,29 @@ class LLMAgent(BaseAgent):
     """
     A simulation agent powered by any LLM accessible via LiteLLM.
 
-    Supported model strings (pass as model_name):
-        - "openai/gpt-4o"
-        - "openai/gpt-4o-mini"         (recommended for low-cost testing)
-        - "anthropic/claude-3-5-sonnet-20241022"
-        - "anthropic/claude-3-haiku-20240307"
-        - "gemini/gemini-1.5-pro"
-        - "ollama/llama3"              (local, no API key required)
-        - "ollama/mistral"
+    Supports any provider accessible through LiteLLM, including
+    OpenRouter (use 'openrouter/provider/model' strings).
 
-    The agent maintains a rolling message history so the LLM retains
-    context of its previous decisions across ticks without exceeding
-    the context window limit.
+    Each agent instance carries its own api_key so multiple agents
+    with different keys can run in the same process without conflict.
+
+    Supported model string examples:
+        - "openrouter/nvidia/nemotron-3-super-120b-a12b:free"
+        - "openrouter/minimax/minimax-m2.5:free"
+        - "openrouter/qwen/qwen3-coder:free"
+        - "openai/gpt-4o-mini"
+        - "anthropic/claude-3-haiku-20240307"
+        - "ollama/llama3"  (local, no API key required)
     """
 
     MAX_HISTORY_TICKS = 5
+    OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
     def __init__(
         self,
         agent_id: str,
-        model_name: str = "openai/gpt-4o-mini",
+        model_name: str = "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+        api_key: Optional[str] = None,
         temperature: float = 0.2,
         max_tokens: int = 2048,
     ):
@@ -46,18 +49,26 @@ class LLMAgent(BaseAgent):
                 "litellm is not installed. Run: pip install litellm"
             )
 
+        # If no key is passed directly, fall back to env variables.
+        # For OpenRouter models, check OPENROUTER_API_KEY as the fallback.
+        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.system_prompt = build_system_prompt()
         self.message_history: list = []
 
+        # Determine base URL: only set for openrouter/ models
+        self.base_url: Optional[str] = (
+            self.OPENROUTER_BASE_URL
+            if model_name.startswith("openrouter/")
+            else None
+        )
+
     def decide(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
         Sends the current game state to the LLM and returns the parsed action payload.
-
-        The state is converted to a JSON string and appended to the rolling
-        message history as a user message. The LLM response is appended as
-        an assistant message to maintain conversational context.
+        The api_key is passed per-call so multiple agents with different keys
+        can run sequentially in the same process.
         """
         state_json = json.dumps(state, indent=2)
         user_message = (
@@ -74,13 +85,21 @@ class LLMAgent(BaseAgent):
             {"role": "system", "content": self.system_prompt},
         ] + self.message_history
 
-        response = litellm.completion(
-            model=self.model_name,
-            messages=messages,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-            response_format={"type": "json_object"},
-        )
+        call_kwargs = {
+            "model": self.model_name,
+            "messages": messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+
+        if self.api_key:
+            call_kwargs["api_key"] = self.api_key
+
+        if self.base_url:
+            call_kwargs["base_url"] = self.base_url
+
+        response = litellm.completion(**call_kwargs)
 
         raw_content = response.choices[0].message.content
 
@@ -93,6 +112,7 @@ class LLMAgent(BaseAgent):
         return json.loads(raw_content)
 
     def reset(self):
+        """Resets conversation history and token counters for a fresh benchmark run."""
         self.message_history = []
         self.tick_count = 0
         self.total_prompt_tokens = 0
