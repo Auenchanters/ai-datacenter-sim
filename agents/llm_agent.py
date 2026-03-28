@@ -22,6 +22,11 @@ class LLMAgent(BaseAgent):
 
     Each agent instance carries its own api_key so multiple agents
     with different keys can run in the same process without conflict.
+
+    NOTE: We intentionally do NOT pass response_format={"type": "json_object"}
+    because free-tier models on OpenRouter do not support it and silently
+    return None content when it is present. JSON output is enforced via
+    the system prompt instead.
     """
 
     MAX_HISTORY_TICKS = 5
@@ -59,12 +64,14 @@ class LLMAgent(BaseAgent):
     def decide(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
         Sends the current game state to the LLM and returns the parsed action payload.
-        Handles None responses and malformed JSON gracefully.
+        JSON output is enforced via the system prompt. response_format is NOT sent
+        because free-tier OpenRouter models silently fail when it is present.
         """
         state_json = json.dumps(state, indent=2)
         user_message = (
             f"TICK {state['tick']} STATE:\n{state_json}\n\n"
-            "Analyze the state above and respond with your JSON action payload."
+            "Respond with ONLY a valid JSON object matching the format in your instructions. "
+            "No markdown, no code fences, no explanation text outside the JSON."
         )
 
         self.message_history.append({"role": "user", "content": user_message})
@@ -81,7 +88,7 @@ class LLMAgent(BaseAgent):
             "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
-            "response_format": {"type": "json_object"},
+            # DO NOT add response_format here - it breaks free-tier OpenRouter models
             "timeout": self.timeout,
         }
 
@@ -92,11 +99,9 @@ class LLMAgent(BaseAgent):
             call_kwargs["base_url"] = self.base_url
 
         response = litellm.completion(**call_kwargs)
-
         raw_content = response.choices[0].message.content
 
-        # Guard against None or empty responses from unreliable free-tier models.
-        # Return an empty action payload so the tick still advances cleanly.
+        # Guard: None or empty content means the model failed silently.
         if not raw_content or raw_content.strip() == "":
             self.error_log.append(
                 f"Tick {state.get('tick', '?')}: Model returned None/empty content."
@@ -109,7 +114,7 @@ class LLMAgent(BaseAgent):
 
         self.message_history.append({"role": "assistant", "content": raw_content})
 
-        # Strip markdown code fences if the model ignores json_object format
+        # Strip markdown code fences if the model wraps its output despite instructions.
         cleaned = raw_content.strip()
         if cleaned.startswith("```"):
             lines = cleaned.splitlines()
@@ -117,6 +122,18 @@ class LLMAgent(BaseAgent):
                 line for line in lines
                 if not line.startswith("```")
             ).strip()
+
+        # If the model produced a <think>...</think> block before the JSON
+        # (common with QwQ reasoning models), strip it before parsing.
+        if "<think>" in cleaned and "</think>" in cleaned:
+            think_end = cleaned.rfind("</think>")
+            cleaned = cleaned[think_end + len("</think>"):].strip()
+
+        # Find the outermost JSON object in case any stray text still surrounds it.
+        brace_start = cleaned.find("{")
+        brace_end = cleaned.rfind("}")
+        if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
+            cleaned = cleaned[brace_start:brace_end + 1]
 
         return json.loads(cleaned)
 
