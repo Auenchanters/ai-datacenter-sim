@@ -11,7 +11,7 @@ Usage:
 
 Setup:
     1. Copy config/.env.example to .env in the project root.
-    2. Fill in your three OpenRouter API keys.
+    2. Set OPENROUTER_API_KEY (one key is enough for all agents).
     3. pip install -r requirements.txt
 
 Output:
@@ -39,13 +39,12 @@ from agents.llm_agent import LLMAgent
 # Free models on OpenRouter as of March 2026 — grouped by backend
 # so we avoid putting all agents on the same upstream provider:
 #
-#   openrouter/nvidia/nemotron-3-super-120b-a12b:free  - NVIDIA backend, 262K ctx
-#   openrouter/mistralai/devstral-small-2503:free      - Mistral backend, 32K ctx, coding-focused
-#   openrouter/google/gemma-3-27b-it:free              - Google backend, 96K ctx
+#   openrouter/nvidia/nemotron-3-super-120b-a12b:free       - NVIDIA backend, 262K ctx
+#   openrouter/mistralai/mistral-small-3.1-24b-instruct:free - Mistral backend, 32K ctx
+#   openrouter/google/gemini-2.5-flash                      - Google backend, 1M ctx
 #
-# REMOVED (Venice backend — sustained upstream outages on free tier):
-#   openrouter/meta-llama/llama-3.3-70b-instruct:free  -> was Venice
-#   openrouter/qwen/qwen3-coder:free                   -> was Venice
+# api_key_env is OPTIONAL per-model override.
+# If not set (or env var is empty), falls back to OPENROUTER_API_KEY.
 # ------------------------------------------------------------
 
 MODELS = [
@@ -54,12 +53,12 @@ MODELS = [
         "api_key_env": "OPENROUTER_API_KEY_NEMOTRON",
     },
     {
-        "model": "openrouter/mistralai/devstral-small-2503:free",
-        "api_key_env": "OPENROUTER_API_KEY_MINIMAX",
+        "model": "openrouter/mistralai/mistral-small-3.1-24b-instruct:free",
+        "api_key_env": "OPENROUTER_API_KEY_MISTRAL",
     },
     {
-        "model": "openrouter/google/gemma-3-27b-it:free",
-        "api_key_env": "OPENROUTER_API_KEY_QWEN",
+        "model": "openrouter/google/gemini-2.5-flash",
+        "api_key_env": "OPENROUTER_API_KEY_GEMINI",
     },
 ]
 
@@ -76,16 +75,33 @@ TICK_DELAY_SECONDS = 8
 
 
 # ------------------------------------------------------------
+# KEY RESOLVER
+# Returns the model-specific key if set, otherwise the shared fallback.
+# ------------------------------------------------------------
+
+def resolve_api_key(api_key_env: str) -> str | None:
+    """Try the per-model override first, then fall back to OPENROUTER_API_KEY."""
+    key = os.getenv(api_key_env)
+    if key:
+        return key
+    return os.getenv("OPENROUTER_API_KEY")
+
+
+# ------------------------------------------------------------
 # WORKER
 # ------------------------------------------------------------
 
 def run_agent_worker(i: int, entry: dict) -> dict | None:
     model_name = entry["model"]
     api_key_env = entry["api_key_env"]
-    api_key = os.getenv(api_key_env)
+    api_key = resolve_api_key(api_key_env)
 
     if not api_key:
-        print(f"  [SKIP] {model_name}: missing env var '{api_key_env}'. Add it to .env and retry.")
+        print(
+            f"  [SKIP] {model_name}: no API key found.\n"
+            f"  Set OPENROUTER_API_KEY in .env (shared key), or\n"
+            f"  set {api_key_env} for a per-model override."
+        )
         return None
 
     total = len(MODELS)
