@@ -36,14 +36,16 @@ from agents.llm_agent import LLMAgent
 # ------------------------------------------------------------
 # MODEL CONFIGURATION
 #
-# Verified free models on OpenRouter as of March 2026:
-#   openrouter/nvidia/nemotron-3-super-120b-a12b:free  - 262K ctx, strong agents
-#   openrouter/meta-llama/llama-3.3-70b-instruct:free  - 128K ctx, reliable & fast
-#   openrouter/qwen/qwen3-coder:free                   - good structured JSON
-#   openrouter/mistral/devstral-2:free                 - 262K ctx, agentic
+# Free models on OpenRouter as of March 2026 — grouped by backend
+# so we avoid putting all agents on the same upstream provider:
 #
-# NOTE: qwen/qwq-32b:free and minimax/minimax-m2.5:free were removed
-# from OpenRouter's free tier as of March 2026 (404 NotFoundError).
+#   openrouter/nvidia/nemotron-3-super-120b-a12b:free  - NVIDIA backend, 262K ctx
+#   openrouter/mistralai/devstral-small-2503:free      - Mistral backend, 32K ctx, coding-focused
+#   openrouter/google/gemma-3-27b-it:free              - Google backend, 96K ctx
+#
+# REMOVED (Venice backend — sustained upstream outages on free tier):
+#   openrouter/meta-llama/llama-3.3-70b-instruct:free  -> was Venice
+#   openrouter/qwen/qwen3-coder:free                   -> was Venice
 # ------------------------------------------------------------
 
 MODELS = [
@@ -52,11 +54,11 @@ MODELS = [
         "api_key_env": "OPENROUTER_API_KEY_NEMOTRON",
     },
     {
-        "model": "openrouter/meta-llama/llama-3.3-70b-instruct:free",
+        "model": "openrouter/mistralai/devstral-small-2503:free",
         "api_key_env": "OPENROUTER_API_KEY_MINIMAX",
     },
     {
-        "model": "openrouter/qwen/qwen3-coder:free",
+        "model": "openrouter/google/gemma-3-27b-it:free",
         "api_key_env": "OPENROUTER_API_KEY_QWEN",
     },
 ]
@@ -68,9 +70,8 @@ VERBOSE = True
 TIMEOUT_SECONDS = 60   # per LLM call
 MAX_TOKENS = 1024      # enough for a full action JSON; keeping low speeds up responses
 
-# OpenRouter free tier allows 8 RPM per model.
-# With 3 parallel agents each making 1 call/tick, we need >= 7.5s between ticks.
-# Set to 8s for a small safety margin.
+# OpenRouter free tier allows 20 RPM per model.
+# With 3 parallel agents on different backends, 8s tick delay is a safe buffer.
 TICK_DELAY_SECONDS = 8
 
 
