@@ -20,36 +20,32 @@ Overheating (above safe_temp_c) degrades performance. Above critical_temp_c = se
 GRID: (0,0) top-left. X right, Y down. No two items on same tile.
 
 EACH TICK you receive JSON with: global_metrics, facility_grid, equipment, workload_market.
-Respond with ONLY a valid JSON object. No markdown. No code fences. No text outside the JSON.
+Respond with ONLY a valid JSON object. No markdown. No code fences. No trailing commas. No text outside the JSON.
 
 VALID ACTIONS
 
 BUY_EQUIPMENT
   Place hardware from the catalog onto the grid.
-  {"action": "BUY_EQUIPMENT", "item_id": "<id>", "x": 0, "y": 0, "facing": "NORTH"}
+  {"command": "BUY_EQUIPMENT", "type": "<item_id>", "position": {"x": 2, "y": 2}, "facing": "NORTH"}
 
-SET_COOLING
+ADJUST_COOLING
   Adjust fan speed of a cooling unit (0.0 to 1.0). Higher = cooler but wastes power.
-  {"action": "SET_COOLING", "equipment_id": "<id>", "fan_speed": 0.6}
+  {"command": "ADJUST_COOLING", "target_id": "<instance_id>", "fan_speed": 0.6}
 
 ACCEPT_CONTRACT
   Accept a pending workload contract.
-  {"action": "ACCEPT_CONTRACT", "contract_id": "<id>"}
+  {"command": "ACCEPT_CONTRACT", "job_id": "<contract_id>"}
 
-ASSIGN_JOB
-  Assign an accepted job to a server.
-  {"action": "ASSIGN_JOB", "job_id": "<id>", "server_id": "<id>"}
+ROUTE_WORKLOAD
+  Assign an accepted job to one or more server racks.
+  {"command": "ROUTE_WORKLOAD", "job_id": "<job_id>", "rack_ids": ["<server_instance_id>"]}
 
-IDLE
-  Do nothing this tick.
-  {"action": "IDLE"}
-
-RESPONSE FORMAT
+RESPONSE FORMAT — the "actions" field is a list of command objects:
 {
   "thoughts": "brief reasoning (1-2 sentences max)",
   "actions": [
-    {"action": "BUY_EQUIPMENT", "item_id": "SERVER_CPU_BASIC", "x": 2, "y": 2, "facing": "NORTH"},
-    {"action": "SET_COOLING", "equipment_id": "cooler_01", "fan_speed": 0.6}
+    {"command": "BUY_EQUIPMENT", "type": "SERVER_CPU_BASIC", "position": {"x": 2, "y": 2}, "facing": "NORTH"},
+    {"command": "ADJUST_COOLING", "target_id": "cooling_abc123", "fan_speed": 0.7}
   ]
 }
 """
