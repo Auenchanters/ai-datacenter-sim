@@ -74,6 +74,10 @@ ENABLE_EVENTS  = True
 VERBOSE        = True
 TIMEOUT_SECONDS = 60
 
+# Minimum number of completed jobs for a model to qualify for ranking.
+# Prevents quota-exhausted / idle agents from topping the leaderboard via PUE=0.
+MIN_JOBS_TO_RANK = 1
+
 
 # ------------------------------------------------------------
 # KEY RESOLVER
@@ -136,6 +140,21 @@ def run_agent_worker(i: int, entry: dict) -> dict | None:
     return result
 
 
+def _composite_score(r: dict) -> tuple:
+    """
+    Composite leaderboard sort key.
+    Priority: jobs_done >= MIN_JOBS_TO_RANK first (eligible agents rank above
+    inactive ones), then by net profit descending, then PUE ascending.
+    Returns a tuple for sort(); lower tuple = better rank.
+    """
+    eligible = 1 if r.get("jobs_done", 0) >= MIN_JOBS_TO_RANK else 0
+    net_profit = r.get("net_profit", 0)
+    pue = r.get("final_pue", 999)
+    # Sort: ineligible last (eligible=0 sorts after eligible=1 with negation trick)
+    # Among eligible: higher profit first (-profit), then lower PUE first
+    return (1 - eligible, -net_profit, pue)
+
+
 # ------------------------------------------------------------
 # RUN
 # ------------------------------------------------------------
@@ -184,7 +203,9 @@ if __name__ == "__main__":
         print("\nNo agents completed. Check your .env file.")
         exit(1)
 
-    results.sort(key=lambda r: r["final_pue"])
+    # Sort by composite score: eligible (jobs_done >= 1) first,
+    # then net profit descending, then PUE ascending.
+    results.sort(key=_composite_score)
 
     print_leaderboard(results)
 

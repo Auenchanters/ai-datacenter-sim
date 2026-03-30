@@ -12,6 +12,16 @@ PRIORITIES each tick (in order):
 3. Thermal safety — if server temp > safe_temp, crank cooling.
 4. Tune PUE — set fan_speed to match actual heat load, never over-cool.
 5. Buy hardware only when you have contracts that need it.
+6. Post-event recovery — when an event just ended (active_events is empty or
+   event no longer listed), immediately re-accept all available pending contracts
+   and re-route any idle jobs. Never stay idle after a crisis resolves.
+
+OPPORTUNITY EVENTS — act aggressively, not defensively:
+- COMPUTE_DEMAND_TSUNAMI: rewards are TRIPLED. Accept EVERY pending contract
+  immediately. Route all jobs to maximize compute utilization. Do NOT reduce
+  fan speeds or cut hardware — this is a profit window, not a cost crisis.
+- Any event with reward multiplier > 1x: same logic — prioritize contract
+  acceptance and job routing over cost savings.
 
 CRISIS CHEATSHEET:
 - price_mult >= 2x: set ALL fan_speed to 0.3, skip hardware buys.

@@ -84,6 +84,20 @@ def _slim_state(state: Dict[str, Any]) -> Dict[str, Any]:
         for j in active
     ]
 
+    # Collect active event names so the agent can distinguish
+    # opportunity events (e.g. COMPUTE_DEMAND_TSUNAMI) from cost events.
+    active_events = [
+        e.get("type", e.get("name", str(e)))
+        for e in state.get("active_events", [])
+        if isinstance(e, dict)
+    ]
+    # Fallback: some engines store events as plain strings
+    if not active_events:
+        active_events = [
+            e for e in state.get("active_events", [])
+            if isinstance(e, str)
+        ]
+
     return {
         "tick": state["tick"],
         "balance": gm.get("bank_balance", 0),
@@ -92,6 +106,7 @@ def _slim_state(state: Dict[str, Any]) -> Dict[str, Any]:
         "cool_kw": round(gm.get("cooling_power_kw", 0), 2),
         "price_mult": gm.get("price_event_multiplier", 1.0),
         "price_ticks_left": gm.get("price_event_ticks_remaining", 0),
+        "active_events": active_events,
         "hotspots": grid.get("thermal_hotspots", []),
         "servers": servers,
         "coolers": coolers,
@@ -149,7 +164,8 @@ class LLMAgent(BaseAgent):
 
         user_message = (
             f"TICK {slim['tick']}|BAL:{slim['balance']}|PUE:{slim['pue']}|"
-            f"PRICE:{slim['price_mult']}x({slim['price_ticks_left']}tks)\n"
+            f"PRICE:{slim['price_mult']}x({slim['price_ticks_left']}tks)|"
+            f"EVENTS:{','.join(slim['active_events']) if slim['active_events'] else 'none'}\n"
             f"{state_json}\n"
             "Reply ONLY valid JSON. No markdown, no fences, no trailing commas."
         )

@@ -7,14 +7,17 @@ from typing import Any, Dict, Optional
 MAX_RATE_LIMIT_RETRIES = 3
 RETRY_BASE_DELAY = 1.0
 
-# Strings that mean the daily/total quota is gone — no retry will help.
+# Strings that mean the daily/total quota is PERMANENTLY gone — no retry will help.
+# NOTE: "rate_limit_exceeded" is intentionally excluded here — that is a
+# per-minute throttle (transient) and should be retried, not fast-failed.
+# Groq returns RateLimitError / 429 for per-minute limits, which is handled
+# separately by the is_rate_limit branch below.
 DAILY_QUOTA_MARKERS = [
     "free-models-per-day",
     "per-day",
     "daily limit",
     "daily quota",
     "tokens-per-day",
-    "rate_limit_exceeded",
     "resource_exhausted",   # Gemini RESOURCE_EXHAUSTED daily cap
     "limit: 0",             # Gemini reports 'limit: 0' when daily quota = 0
     "per day per project",  # Gemini GenerateRequestsPerDayPerProject
@@ -68,7 +71,11 @@ class BaseAgent(ABC):
                     return {"thoughts": "Daily quota exhausted.", "actions": []}
 
                 # Transient per-minute throttle — retry with backoff.
-                is_rate_limit = "RateLimitError" in type(e).__name__ or "429" in err_str
+                is_rate_limit = (
+                    "RateLimitError" in type(e).__name__
+                    or "429" in err_str
+                    or "rate_limit_exceeded" in err_lower
+                )
                 if is_rate_limit and attempt < MAX_RATE_LIMIT_RETRIES:
                     wait = RETRY_BASE_DELAY * (2 ** attempt)
                     print(
