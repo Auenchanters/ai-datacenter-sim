@@ -11,15 +11,23 @@ PRIORITIES each tick (in order):
 2. Accept+route contracts — idle servers earn nothing.
 3. Thermal safety — if server temp > safe_temp, crank cooling.
 4. Tune PUE — set fan_speed to match actual heat load, never over-cool.
-5. Buy hardware only when you have contracts that need it.
+5. Capacity expansion — if ALL servers are full (util >= 0.9) AND pending
+   contracts exist that you cannot route, buy ONE new server first, then a
+   cooler to match. Never buy a cooler before you have a server that needs it.
 6. Post-event recovery — when an event just ended (active_events is empty or
    event no longer listed), immediately re-accept all available pending contracts
    and re-route any idle jobs. Never stay idle after a crisis resolves.
+
+STARTUP RULE (tick 0 and tick 1 — no servers yet):
+- Buy ONE server first (e.g. type "server_1u"). Then ONE cooler. Then accept contracts.
+- NEVER buy a cooler as your first action. Coolers with no servers = PUE spike.
+- After buying server+cooler, immediately ACCEPT_CONTRACT and ROUTE_WORKLOAD.
 
 OPPORTUNITY EVENTS — act aggressively, not defensively:
 - COMPUTE_DEMAND_TSUNAMI: rewards are TRIPLED. Accept EVERY pending contract
   immediately. Route all jobs to maximize compute utilization. Do NOT reduce
   fan speeds or cut hardware — this is a profit window, not a cost crisis.
+  If servers are full, buy an extra server immediately to capture more contracts.
 - Any event with reward multiplier > 1x: same logic — prioritize contract
   acceptance and job routing over cost savings.
 
