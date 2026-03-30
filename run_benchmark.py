@@ -1,21 +1,23 @@
 """
 run_benchmark.py
 ----------------
-Entry point for running the full multi-model benchmark suite.
-
-Agents run in PARALLEL - each has its own API key so there are no
-rate-limit conflicts. Total wall-clock time = slowest single agent.
+Entry point for the benchmark. Runs one or more LLM agents against the
+ai-datacenter-sim environment and prints a leaderboard.
 
 Usage:
     python run_benchmark.py
 
 Setup:
     1. Copy config/.env.example to .env in the project root.
-    2. Set OPENROUTER_API_KEY (one key is enough for all agents).
+    2. Set OPENROUTER_API_KEY to your key (one key is enough).
     3. pip install -r requirements.txt
 
+To benchmark multiple models, add more entries to the MODELS list below.
+Each model automatically uses OPENROUTER_API_KEY unless you add an optional
+'api_key_env' field pointing to a different env var.
+
 Output:
-    - Leaderboard printed to terminal.
+    - Leaderboard printed to terminal
     - Summary     -> output/benchmark_<timestamp>.csv
     - Tick logs   -> output/tick_log_<model>_<timestamp>.csv
 """
@@ -36,29 +38,20 @@ from agents.llm_agent import LLMAgent
 # ------------------------------------------------------------
 # MODEL CONFIGURATION
 #
-# Free models on OpenRouter as of March 2026 — grouped by backend
-# so we avoid putting all agents on the same upstream provider:
+# Add more dicts to this list to benchmark multiple models.
+# 'api_key_env' is optional — if omitted or empty, falls back
+# to OPENROUTER_API_KEY from .env automatically.
 #
-#   openrouter/nvidia/nemotron-3-super-120b-a12b:free       - NVIDIA backend, 262K ctx
-#   openrouter/mistralai/mistral-small-3.1-24b-instruct:free - Mistral backend, 32K ctx
-#   openrouter/google/gemini-2.5-flash                      - Google backend, 1M ctx
-#
-# api_key_env is OPTIONAL per-model override.
-# If not set (or env var is empty), falls back to OPENROUTER_API_KEY.
+# Good free models on OpenRouter (March 2026, all 262K context):
+#   openrouter/nvidia/nemotron-3-super-120b-a12b:free  (AI Agents, 262K)
+#   openrouter/qwen/qwen3-next-80b-a3b-instruct:free   (Agents/RAG, 262K)
+#   openrouter/mistralai/devstral-2512:free            (Coding, 262K)
+#   openrouter/mistralai/mistral-small-3.1-24b-instruct:free (General, 32K)
 # ------------------------------------------------------------
 
 MODELS = [
     {
         "model": "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
-        "api_key_env": "OPENROUTER_API_KEY_NEMOTRON",
-    },
-    {
-        "model": "openrouter/mistralai/mistral-small-3.1-24b-instruct:free",
-        "api_key_env": "OPENROUTER_API_KEY_MISTRAL",
-    },
-    {
-        "model": "openrouter/google/gemini-2.5-flash",
-        "api_key_env": "OPENROUTER_API_KEY_GEMINI",
     },
 ]
 
@@ -66,24 +59,22 @@ TICKS = 100
 SEED = 42
 ENABLE_EVENTS = True
 VERBOSE = True
-TIMEOUT_SECONDS = 60   # per LLM call
-MAX_TOKENS = 1024      # enough for a full action JSON; keeping low speeds up responses
-
-# OpenRouter free tier allows 20 RPM per model.
-# With 3 parallel agents on different backends, 8s tick delay is a safe buffer.
+TIMEOUT_SECONDS = 60
+MAX_TOKENS = 1024
 TICK_DELAY_SECONDS = 8
 
 
 # ------------------------------------------------------------
 # KEY RESOLVER
-# Returns the model-specific key if set, otherwise the shared fallback.
 # ------------------------------------------------------------
 
-def resolve_api_key(api_key_env: str) -> str | None:
-    """Try the per-model override first, then fall back to OPENROUTER_API_KEY."""
-    key = os.getenv(api_key_env)
-    if key:
-        return key
+def resolve_api_key(entry: dict) -> str | None:
+    """Return per-model key if specified, otherwise the shared OPENROUTER_API_KEY."""
+    env_var = entry.get("api_key_env")
+    if env_var:
+        key = os.getenv(env_var)
+        if key:
+            return key
     return os.getenv("OPENROUTER_API_KEY")
 
 
@@ -93,14 +84,12 @@ def resolve_api_key(api_key_env: str) -> str | None:
 
 def run_agent_worker(i: int, entry: dict) -> dict | None:
     model_name = entry["model"]
-    api_key_env = entry["api_key_env"]
-    api_key = resolve_api_key(api_key_env)
+    api_key = resolve_api_key(entry)
 
     if not api_key:
         print(
-            f"  [SKIP] {model_name}: no API key found.\n"
-            f"  Set OPENROUTER_API_KEY in .env (shared key), or\n"
-            f"  set {api_key_env} for a per-model override."
+            f"  [SKIP] {model_name}: OPENROUTER_API_KEY not set in .env.\n"
+            f"  Copy config/.env.example to .env and add your key."
         )
         return None
 
@@ -137,7 +126,7 @@ def run_agent_worker(i: int, entry: dict) -> dict | None:
 if __name__ == "__main__":
     print()
     print("=" * 60)
-    print("  ai-datacenter-sim  |  Multi-Model Benchmark")
+    print("  ai-datacenter-sim  |  Benchmark")
     print("=" * 60)
     print(f"  Models     : {len(MODELS)}")
     print(f"  Ticks      : {TICKS}")
@@ -145,7 +134,8 @@ if __name__ == "__main__":
     print(f"  Events     : {ENABLE_EVENTS}")
     print(f"  Timeout    : {TIMEOUT_SECONDS}s per call")
     print(f"  Tick delay : {TICK_DELAY_SECONDS}s (rate-limit guard)")
-    print(f"  Mode       : PARALLEL (all agents run simultaneously)")
+    mode = "PARALLEL" if len(MODELS) > 1 else "SINGLE"
+    print(f"  Mode       : {mode}")
     print("=" * 60)
 
     if not MODELS:
