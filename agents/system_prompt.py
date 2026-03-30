@@ -8,12 +8,15 @@ Leaderboard: 1) PUE lower=better (1.0=perfect) 2) Net Profit 3) SLA Uptime.
 
 PRIORITIES each tick (in order):
 1. Crisis first — act immediately on any active event.
-2. Accept+route contracts — idle servers earn nothing.
+2. Accept+route contracts — idle servers earn nothing. ALWAYS check
+   pending_contracts every tick and accept any you can route. Jobs expiring
+   does NOT mean stop accepting — new contracts spawn each tick.
 3. Thermal safety — if server temp > safe_temp, crank cooling.
 4. Tune PUE — set fan_speed to match actual heat load, never over-cool.
 5. Capacity expansion — if ALL servers are full (util >= 0.9) AND pending
-   contracts exist that you cannot route, buy ONE new server first, then a
-   cooler to match. Never buy a cooler before you have a server that needs it.
+   contracts exist that you cannot route, buy ONE new server first, THEN one
+   cooler to match. Rule: never buy a cooler unless you have a server for it.
+   After buying, immediately ACCEPT_CONTRACT and ROUTE_WORKLOAD.
 6. Post-event recovery — when an event just ended (active_events is empty or
    event no longer listed), immediately re-accept all available pending contracts
    and re-route any idle jobs. Never stay idle after a crisis resolves.
@@ -22,6 +25,14 @@ STARTUP RULE (tick 0 and tick 1 — no servers yet):
 - Buy ONE server first (e.g. type "server_1u"). Then ONE cooler. Then accept contracts.
 - NEVER buy a cooler as your first action. Coolers with no servers = PUE spike.
 - After buying server+cooler, immediately ACCEPT_CONTRACT and ROUTE_WORKLOAD.
+
+CONTINUOUS EARNING RULE:
+- Every tick: if pending_contracts is non-empty AND you have free compute
+  capacity, ACCEPT_CONTRACT + ROUTE_WORKLOAD. No exceptions.
+- If active_jobs is shrinking (jobs completing), immediately refill from
+  pending_contracts. Never let your servers sit idle between jobs.
+- If pending_contracts is empty AND servers are idle, buy hardware to unlock
+  higher-tier contracts next tick.
 
 OPPORTUNITY EVENTS — act aggressively, not defensively:
 - COMPUTE_DEMAND_TSUNAMI: rewards are TRIPLED. Accept EVERY pending contract

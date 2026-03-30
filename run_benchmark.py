@@ -50,21 +50,21 @@ from agents.llm_agent import LLMAgent
 # Both run in parallel. Comment out either to run solo.
 # api_key_env: which .env variable holds the key for this model
 # tick_delay:  seconds between ticks (rate-limit guard per model)
-# max_tokens:  cap output tokens per call (JSON never needs > 400)
+# max_tokens:  cap output tokens per call (JSON response is ~100-200 tokens)
 # ------------------------------------------------------------
 
 MODELS = [
     {
         "model": "groq/llama-3.3-70b-versatile",
         "api_key_env": "GROQ_API_KEY",
-        "tick_delay": 2.0,    # Groq: fast, ~14,400 req/day free
-        "max_tokens": 512,
+        "tick_delay": 4.0,    # 4s gap prevents per-minute throttle storms that burn TPD budget
+        "max_tokens": 300,    # JSON actions never exceed 200 tokens; 300 gives headroom
     },
     {
-        "model": "gemini/gemini-2.0-flash-lite",  # Cheapest Gemini free model
+        "model": "gemini/gemini-2.0-flash-lite",
         "api_key_env": "GEMINI_API_KEY",
         "tick_delay": 4.0,    # Gemini free tier: 15 RPM limit, 4s keeps us safe
-        "max_tokens": 400,    # Flash-lite is concise; 400 is plenty for JSON
+        "max_tokens": 300,
     },
 ]
 
@@ -104,8 +104,8 @@ def resolve_api_key(entry: dict) -> str | None:
 def run_agent_worker(i: int, entry: dict) -> dict | None:
     model_name  = entry["model"]
     api_key     = resolve_api_key(entry)
-    tick_delay  = entry.get("tick_delay", 2.0)
-    max_tokens  = entry.get("max_tokens", 512)
+    tick_delay  = entry.get("tick_delay", 4.0)
+    max_tokens  = entry.get("max_tokens", 300)
 
     if not api_key:
         print(
@@ -143,11 +143,14 @@ def run_agent_worker(i: int, entry: dict) -> dict | None:
 def _composite_score(r: dict) -> tuple:
     """
     Composite leaderboard sort key.
-    Priority: jobs_done >= MIN_JOBS_TO_RANK first (eligible agents rank above
-    inactive ones), then by net profit descending, then PUE ascending.
+    Priority: jobs_completed >= MIN_JOBS_TO_RANK first (eligible agents rank
+    above inactive ones), then by net profit descending, then PUE ascending.
     Returns a tuple for sort(); lower tuple = better rank.
+
+    NOTE: the runner returns 'jobs_completed' (not 'jobs_done') — must match
+    the key name in benchmark/runner.py's return dict exactly.
     """
-    eligible = 1 if r.get("jobs_done", 0) >= MIN_JOBS_TO_RANK else 0
+    eligible = 1 if r.get("jobs_completed", 0) >= MIN_JOBS_TO_RANK else 0
     net_profit = r.get("net_profit", 0)
     pue = r.get("final_pue", 999)
     # Sort: ineligible last (eligible=0 sorts after eligible=1 with negation trick)
@@ -184,7 +187,7 @@ if __name__ == "__main__":
     mode = "PARALLEL" if len(available) > 1 else "SINGLE"
     print(f"  Mode       : {mode}")
     for e in available:
-        print(f"    - {e['model']}  |  delay: {e.get('tick_delay', 2.0)}s/tick  |  max_tokens: {e.get('max_tokens', 512)}")
+        print(f"    - {e['model']}  |  delay: {e.get('tick_delay', 4.0)}s/tick  |  max_tokens: {e.get('max_tokens', 300)}")
     print("=" * 60)
 
     results = []
@@ -203,7 +206,7 @@ if __name__ == "__main__":
         print("\nNo agents completed. Check your .env file.")
         exit(1)
 
-    # Sort by composite score: eligible (jobs_done >= 1) first,
+    # Sort by composite score: eligible (jobs_completed >= 1) first,
     # then net profit descending, then PUE ascending.
     results.sort(key=_composite_score)
 
