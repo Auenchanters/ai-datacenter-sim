@@ -13,8 +13,14 @@ Setup:
     3. pip install -r requirements.txt
 
 FREE API KEYS:
-    Groq  : https://console.groq.com          (~14,400 req/day)
-    Gemini: https://aistudio.google.com       (~1,500 req/day)
+    Groq  : https://console.groq.com          (~14,400 req/day free)
+    Gemini: https://aistudio.google.com       (~1,500 req/day free)
+
+Gemini model choice: gemini-2.0-flash-lite
+    - Cheapest Gemini model on the free tier
+    - ~3-5x fewer output tokens than gemini-2.0-flash
+    - Still follows JSON instructions reliably
+    - 50 ticks uses ~150-200 of your 1,500 daily requests
 
 Both agents run in parallel on the same 50-tick scenario.
 Tick delays are staggered so they don't fire at the exact same millisecond
@@ -44,18 +50,21 @@ from agents.llm_agent import LLMAgent
 # Both run in parallel. Comment out either to run solo.
 # api_key_env: which .env variable holds the key for this model
 # tick_delay:  seconds between ticks (rate-limit guard per model)
+# max_tokens:  cap output tokens per call (JSON never needs > 400)
 # ------------------------------------------------------------
 
 MODELS = [
     {
         "model": "groq/llama-3.3-70b-versatile",
         "api_key_env": "GROQ_API_KEY",
-        "tick_delay": 2.0,   # Groq: fast, generous quota
+        "tick_delay": 2.0,    # Groq: fast, ~14,400 req/day free
+        "max_tokens": 512,
     },
     {
-        "model": "gemini/gemini-2.0-flash",
+        "model": "gemini/gemini-2.0-flash-lite",  # Cheapest Gemini free model
         "api_key_env": "GEMINI_API_KEY",
-        "tick_delay": 3.0,   # Gemini: slightly slower, 15 RPM free tier
+        "tick_delay": 4.0,    # Gemini free tier: 15 RPM limit, 4s keeps us safe
+        "max_tokens": 400,    # Flash-lite is concise; 400 is plenty for JSON
     },
 ]
 
@@ -64,7 +73,6 @@ SEED  = 42             # Fixed seed = same events for both agents (fair comparis
 ENABLE_EVENTS  = True
 VERBOSE        = True
 TIMEOUT_SECONDS = 60
-MAX_TOKENS      = 1024
 
 
 # ------------------------------------------------------------
@@ -93,6 +101,7 @@ def run_agent_worker(i: int, entry: dict) -> dict | None:
     model_name  = entry["model"]
     api_key     = resolve_api_key(entry)
     tick_delay  = entry.get("tick_delay", 2.0)
+    max_tokens  = entry.get("max_tokens", 512)
 
     if not api_key:
         print(
@@ -111,7 +120,7 @@ def run_agent_worker(i: int, entry: dict) -> dict | None:
         model_name=model_name,
         api_key=api_key,
         timeout=TIMEOUT_SECONDS,
-        max_tokens=MAX_TOKENS,
+        max_tokens=max_tokens,
     )
 
     result = run_single_agent(
@@ -156,7 +165,7 @@ if __name__ == "__main__":
     mode = "PARALLEL" if len(available) > 1 else "SINGLE"
     print(f"  Mode       : {mode}")
     for e in available:
-        print(f"    - {e['model']} (delay: {e.get('tick_delay', 2.0)}s/tick)")
+        print(f"    - {e['model']}  |  delay: {e.get('tick_delay', 2.0)}s/tick  |  max_tokens: {e.get('max_tokens', 512)}")
     print("=" * 60)
 
     results = []
