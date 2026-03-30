@@ -9,12 +9,24 @@ Usage:
 
 Setup:
     1. Copy config/.env.example to .env in the project root.
-    2. Set OPENROUTER_API_KEY to your key (one key is enough).
+    2. Set GROQ_API_KEY (recommended) or OPENROUTER_API_KEY.
     3. pip install -r requirements.txt
 
-To benchmark multiple models, add more entries to the MODELS list below.
-Each model automatically uses OPENROUTER_API_KEY unless you add an optional
-'api_key_env' field pointing to a different env var.
+RECOMMENDED FREE MODELS (March 2026):
+
+  Groq  — fastest, ~14,400 req/day free:
+    groq/llama-3.3-70b-versatile      (best JSON quality)
+    groq/llama-3.1-8b-instant         (faster, lower quality)
+    groq/gemma2-9b-it                 (good JSON, very fast)
+
+  Gemini — 1,500 req/day free:
+    gemini/gemini-2.0-flash           (use GEMINI_API_KEY)
+
+  OpenRouter free tier (50-1000 req/day depending on model):
+    openrouter/google/gemma-3-27b-it:free
+    openrouter/mistralai/mistral-small-3.1-24b-instruct:free
+
+To benchmark multiple models, add more dicts to the MODELS list below.
 
 Output:
     - Leaderboard printed to terminal
@@ -38,30 +50,36 @@ from agents.llm_agent import LLMAgent
 # ------------------------------------------------------------
 # MODEL CONFIGURATION
 #
-# Add more dicts to this list to benchmark multiple models.
-# 'api_key_env' is optional — if omitted or empty, falls back
-# to OPENROUTER_API_KEY from .env automatically.
+# GROQ (recommended): set GROQ_API_KEY in .env
+#   Get a free key at https://console.groq.com
+#   ~14,400 free requests/day, very fast, great JSON compliance
 #
-# Good free models on OpenRouter (March 2026, all 262K context):
-#   openrouter/nvidia/nemotron-3-super-120b-a12b:free  (AI Agents, 262K)
-#   openrouter/qwen/qwen3-next-80b-a3b-instruct:free   (Agents/RAG, 262K)
-#   openrouter/mistralai/devstral-2512:free            (Coding, 262K)
-#   openrouter/mistralai/mistral-small-3.1-24b-instruct:free (General, 32K)
+# GEMINI: set GEMINI_API_KEY in .env
+#   Get a free key at https://aistudio.google.com
+#   1,500 free requests/day
+#
+# OPENROUTER: set OPENROUTER_API_KEY in .env
+#   Get a free key at https://openrouter.ai
+#   50-1000 req/day depending on model (free tier)
 # ------------------------------------------------------------
 
 MODELS = [
     {
-        "model": "openrouter/nvidia/nemotron-3-super-120b-a12b:free",
+        "model": "groq/llama-3.3-70b-versatile",
+        "api_key_env": "GROQ_API_KEY",
     },
+    # Uncomment to benchmark multiple models:
+    # {"model": "gemini/gemini-2.0-flash", "api_key_env": "GEMINI_API_KEY"},
+    # {"model": "openrouter/google/gemma-3-27b-it:free", "api_key_env": "OPENROUTER_API_KEY"},
 ]
 
-TICKS = 100
+TICKS = 100            # Groq free tier supports this easily (~14,400 req/day)
 SEED = 42
 ENABLE_EVENTS = True
 VERBOSE = True
 TIMEOUT_SECONDS = 60
 MAX_TOKENS = 1024
-TICK_DELAY_SECONDS = 8
+TICK_DELAY_SECONDS = 2  # Groq is fast; 2s is enough to stay under per-minute limits
 
 
 # ------------------------------------------------------------
@@ -69,13 +87,18 @@ TICK_DELAY_SECONDS = 8
 # ------------------------------------------------------------
 
 def resolve_api_key(entry: dict) -> str | None:
-    """Return per-model key if specified, otherwise the shared OPENROUTER_API_KEY."""
+    """Return per-model key if specified, otherwise fall back to common keys."""
     env_var = entry.get("api_key_env")
     if env_var:
         key = os.getenv(env_var)
         if key:
             return key
-    return os.getenv("OPENROUTER_API_KEY")
+    # Fallback chain: Groq -> Gemini -> OpenRouter
+    return (
+        os.getenv("GROQ_API_KEY")
+        or os.getenv("GEMINI_API_KEY")
+        or os.getenv("OPENROUTER_API_KEY")
+    )
 
 
 # ------------------------------------------------------------
@@ -88,8 +111,8 @@ def run_agent_worker(i: int, entry: dict) -> dict | None:
 
     if not api_key:
         print(
-            f"  [SKIP] {model_name}: OPENROUTER_API_KEY not set in .env.\n"
-            f"  Copy config/.env.example to .env and add your key."
+            f"  [SKIP] {model_name}: No API key found.\n"
+            f"  Set GROQ_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY in .env"
         )
         return None
 
@@ -133,7 +156,7 @@ if __name__ == "__main__":
     print(f"  Seed       : {SEED}")
     print(f"  Events     : {ENABLE_EVENTS}")
     print(f"  Timeout    : {TIMEOUT_SECONDS}s per call")
-    print(f"  Tick delay : {TICK_DELAY_SECONDS}s (rate-limit guard)")
+    print(f"  Tick delay : {TICK_DELAY_SECONDS}s")
     mode = "PARALLEL" if len(MODELS) > 1 else "SINGLE"
     print(f"  Mode       : {mode}")
     print("=" * 60)

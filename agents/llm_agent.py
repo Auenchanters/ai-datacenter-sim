@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from typing import Any, Dict, Optional
 
 try:
@@ -13,12 +14,24 @@ from agents.base_agent import BaseAgent
 from agents.system_prompt import build_system_prompt
 
 
+def _repair_json(text: str) -> str:
+    """
+    Attempts to repair common LLM JSON formatting mistakes before parsing:
+      - Trailing commas before } or ]  e.g. {"key": "val",}
+      - Single-quoted strings are NOT fixed here (rare; rely on fence stripping)
+    """
+    # Remove trailing commas before closing braces/brackets
+    text = re.sub(r',\s*([}\]])', r'\1', text)
+    return text
+
+
 class LLMAgent(BaseAgent):
     """
     A simulation agent powered by any LLM accessible via LiteLLM.
 
     Supports any provider accessible through LiteLLM, including
-    OpenRouter (use 'openrouter/provider/model' strings).
+    OpenRouter (use 'openrouter/provider/model' strings) and
+    Groq (use 'groq/model-name' strings).
 
     Each agent instance carries its own api_key so multiple agents
     with different keys can run in the same process without conflict.
@@ -37,7 +50,7 @@ class LLMAgent(BaseAgent):
     def __init__(
         self,
         agent_id: str,
-        model_name: str = "openrouter/qwen/qwq-32b:free",
+        model_name: str = "groq/llama-3.3-70b-versatile",
         api_key: Optional[str] = None,
         temperature: float = 0.2,
         max_tokens: int = 2048,
@@ -50,8 +63,6 @@ class LLMAgent(BaseAgent):
                 "litellm is not installed. Run: pip install litellm"
             )
 
-        # Prefer explicitly passed key; do NOT fall back to a shared global env var
-        # so that parallel agents each use their own dedicated key.
         self.api_key = api_key
         if not self.api_key:
             raise ValueError(
@@ -81,7 +92,7 @@ class LLMAgent(BaseAgent):
         user_message = (
             f"TICK {state['tick']} STATE:\n{state_json}\n\n"
             "Respond with ONLY a valid JSON object matching the format in your instructions. "
-            "No markdown, no code fences, no explanation text outside the JSON."
+            "No markdown, no code fences, no trailing commas, no explanation text outside the JSON."
         )
 
         self.message_history.append({"role": "user", "content": user_message})
@@ -98,10 +109,7 @@ class LLMAgent(BaseAgent):
             "messages": messages,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
-            # DO NOT add response_format here - it breaks free-tier OpenRouter models
             "timeout": self.timeout,
-            # Always pass the key explicitly per-call so parallel agents
-            # never share or overwrite each other's credentials via litellm globals.
             "api_key": self.api_key,
         }
 
@@ -111,7 +119,6 @@ class LLMAgent(BaseAgent):
         response = litellm.completion(**call_kwargs)
         raw_content = response.choices[0].message.content
 
-        # Guard: None or empty content means the model failed silently.
         if not raw_content or raw_content.strip() == "":
             self.error_log.append(
                 f"Tick {state.get('tick', '?')}: Model returned None/empty content."
@@ -133,17 +140,19 @@ class LLMAgent(BaseAgent):
                 if not line.startswith("```")
             ).strip()
 
-        # If the model produced a <think>...</think> block before the JSON
-        # (common with QwQ reasoning models), strip it before parsing.
+        # Strip <think>...</think> reasoning blocks (QwQ / DeepSeek-R1 style models).
         if "<think>" in cleaned and "</think>" in cleaned:
             think_end = cleaned.rfind("</think>")
             cleaned = cleaned[think_end + len("</think>"):].strip()
 
-        # Find the outermost JSON object in case any stray text still surrounds it.
+        # Extract outermost JSON object in case stray text still surrounds it.
         brace_start = cleaned.find("{")
         brace_end = cleaned.rfind("}")
         if brace_start != -1 and brace_end != -1 and brace_end > brace_start:
             cleaned = cleaned[brace_start:brace_end + 1]
+
+        # Fix 2: Repair common JSON formatting mistakes before parsing.
+        cleaned = _repair_json(cleaned)
 
         return json.loads(cleaned)
 
