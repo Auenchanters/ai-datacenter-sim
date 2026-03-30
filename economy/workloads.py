@@ -37,8 +37,7 @@ JOB_TYPES = [
         "max_expiry_ticks": 30,
         "description": (
             "Low-value contract. Suitable for basic CPU racks. "
-            "Long expiry window gives the AI time to provision resources. "
-            "Low risk, low reward."
+            "Long expiry window gives the AI time to provision resources. Low risk, low reward."
         ),
     },
     {
@@ -50,8 +49,7 @@ JOB_TYPES = [
         "max_expiry_ticks": 25,
         "description": (
             "Moderate-value contract. Requires reliable CPU racks with "
-            "stable uptime. Penalizes SLA failures more harshly than "
-            "other job types."
+            "stable uptime. Penalizes SLA failures more harshly than other job types."
         ),
     },
     {
@@ -63,8 +61,33 @@ JOB_TYPES = [
         "max_expiry_ticks": 12,
         "description": (
             "High-value, time-sensitive contract. Requires significant "
-            "compute density. Very short expiry window tests the AI's "
-            "ability to provision hardware proactively."
+            "compute density. Very short expiry window — provision hardware proactively."
+        ),
+    },
+    {
+        "type": "EMERGENCY_FAILOVER",
+        "display_name": "Emergency Failover Hosting",
+        "compute_required": 600,
+        "reward_per_tick": 8000.0,
+        "min_expiry_ticks": 3,
+        "max_expiry_ticks": 5,
+        "description": (
+            "CRISIS CONTRACT: Another datacenter has gone offline. "
+            "Enormous reward but expires in 3-5 ticks. "
+            "Accept and route IMMEDIATELY or the contract vanishes."
+        ),
+    },
+    {
+        "type": "RANSOMWARE_RECOVERY",
+        "display_name": "Ransomware Recovery Compute",
+        "compute_required": 400,
+        "reward_per_tick": 6000.0,
+        "min_expiry_ticks": 4,
+        "max_expiry_ticks": 7,
+        "description": (
+            "CRISIS CONTRACT: Security firm needs isolated compute for malware analysis. "
+            "Very high reward, very short window. "
+            "Do NOT assign to any server marked ISOLATED."
         ),
     },
 ]
@@ -76,17 +99,18 @@ class WorkloadSpawner:
     """
     Generates dynamic compute contracts each simulation tick.
 
-    The spawner uses a weighted probability system so that early in
-    the game, simpler low-compute jobs are more likely, giving the AI
-    time to provision hardware before demanding GPU workloads appear.
-
-    After a configurable tick threshold, the mix shifts toward
-    high-value AI training and HPC jobs.
+    Early game: simple low-compute jobs to let the AI provision hardware.
+    Late game: high-value, time-sensitive jobs and crisis contracts.
+    Crisis contracts (EMERGENCY_FAILOVER, RANSOMWARE_RECOVERY) spawn
+    rarely but at extreme reward — the AI must react within 3-5 ticks.
     """
 
-    EARLY_WEIGHTS = [0.10, 0.15, 0.40, 0.30, 0.05]
-    LATE_WEIGHTS  = [0.30, 0.25, 0.15, 0.15, 0.15]
-    LATE_GAME_TICK = 20
+    # Weights match JOB_TYPES order:
+    # AI_TRAINING, AI_INFERENCE, WEB_HOSTING, DATABASE_HOSTING, HPC_SIMULATION,
+    # EMERGENCY_FAILOVER, RANSOMWARE_RECOVERY
+    EARLY_WEIGHTS = [0.08, 0.12, 0.40, 0.30, 0.05, 0.03, 0.02]
+    LATE_WEIGHTS  = [0.25, 0.20, 0.12, 0.12, 0.15, 0.10, 0.06]
+    LATE_GAME_TICK = 15  # Crisis contracts start appearing earlier in 50-tick game
 
     def __init__(
         self,
@@ -135,10 +159,6 @@ class WorkloadSpawner:
         return contracts
 
     def get_all_job_types_for_prompt(self) -> List[Dict[str, Any]]:
-        """
-        Returns a minimal list of job type definitions for the AI system prompt.
-        Gives the AI context on what kinds of workloads it should prepare hardware for.
-        """
         return [
             {
                 "type": j["type"],

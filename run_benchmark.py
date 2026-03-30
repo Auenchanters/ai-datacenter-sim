@@ -1,32 +1,24 @@
 """
 run_benchmark.py
 ----------------
-Entry point for the benchmark. Runs one or more LLM agents against the
-ai-datacenter-sim environment and prints a leaderboard.
+Entry point for the benchmark. Runs one or more LLM agents in PARALLEL against
+the ai-datacenter-sim environment and prints a leaderboard.
 
 Usage:
     python run_benchmark.py
 
 Setup:
     1. Copy config/.env.example to .env in the project root.
-    2. Set GROQ_API_KEY (recommended) or OPENROUTER_API_KEY.
+    2. Set GROQ_API_KEY and/or GEMINI_API_KEY in .env
     3. pip install -r requirements.txt
 
-RECOMMENDED FREE MODELS (March 2026):
+FREE API KEYS:
+    Groq  : https://console.groq.com          (~14,400 req/day)
+    Gemini: https://aistudio.google.com       (~1,500 req/day)
 
-  Groq  — fastest, ~14,400 req/day free:
-    groq/llama-3.3-70b-versatile      (best JSON quality)
-    groq/llama-3.1-8b-instant         (faster, lower quality)
-    groq/gemma2-9b-it                 (good JSON, very fast)
-
-  Gemini — 1,500 req/day free:
-    gemini/gemini-2.0-flash           (use GEMINI_API_KEY)
-
-  OpenRouter free tier (50-1000 req/day depending on model):
-    openrouter/google/gemma-3-27b-it:free
-    openrouter/mistralai/mistral-small-3.1-24b-instruct:free
-
-To benchmark multiple models, add more dicts to the MODELS list below.
+Both agents run in parallel on the same 50-tick scenario.
+Tick delays are staggered so they don't fire at the exact same millisecond
+and eat into each other's per-minute rate limits.
 
 Output:
     - Leaderboard printed to terminal
@@ -49,37 +41,30 @@ from agents.llm_agent import LLMAgent
 
 # ------------------------------------------------------------
 # MODEL CONFIGURATION
-#
-# GROQ (recommended): set GROQ_API_KEY in .env
-#   Get a free key at https://console.groq.com
-#   ~14,400 free requests/day, very fast, great JSON compliance
-#
-# GEMINI: set GEMINI_API_KEY in .env
-#   Get a free key at https://aistudio.google.com
-#   1,500 free requests/day
-#
-# OPENROUTER: set OPENROUTER_API_KEY in .env
-#   Get a free key at https://openrouter.ai
-#   50-1000 req/day depending on model (free tier)
+# Both run in parallel. Comment out either to run solo.
+# api_key_env: which .env variable holds the key for this model
+# tick_delay:  seconds between ticks (rate-limit guard per model)
 # ------------------------------------------------------------
 
 MODELS = [
     {
         "model": "groq/llama-3.3-70b-versatile",
         "api_key_env": "GROQ_API_KEY",
+        "tick_delay": 2.0,   # Groq: fast, generous quota
     },
-    # Uncomment to benchmark multiple models:
-    # {"model": "gemini/gemini-2.0-flash", "api_key_env": "GEMINI_API_KEY"},
-    # {"model": "openrouter/google/gemma-3-27b-it:free", "api_key_env": "OPENROUTER_API_KEY"},
+    {
+        "model": "gemini/gemini-2.0-flash",
+        "api_key_env": "GEMINI_API_KEY",
+        "tick_delay": 3.0,   # Gemini: slightly slower, 15 RPM free tier
+    },
 ]
 
-TICKS = 100            # Groq free tier supports this easily (~14,400 req/day)
-SEED = 42
-ENABLE_EVENTS = True
-VERBOSE = True
+TICKS = 50             # 50 ticks: enough depth, stays well under daily quotas
+SEED  = 42             # Fixed seed = same events for both agents (fair comparison)
+ENABLE_EVENTS  = True
+VERBOSE        = True
 TIMEOUT_SECONDS = 60
-MAX_TOKENS = 1024
-TICK_DELAY_SECONDS = 2  # Groq is fast; 2s is enough to stay under per-minute limits
+MAX_TOKENS      = 1024
 
 
 # ------------------------------------------------------------
@@ -87,13 +72,12 @@ TICK_DELAY_SECONDS = 2  # Groq is fast; 2s is enough to stay under per-minute li
 # ------------------------------------------------------------
 
 def resolve_api_key(entry: dict) -> str | None:
-    """Return per-model key if specified, otherwise fall back to common keys."""
     env_var = entry.get("api_key_env")
     if env_var:
         key = os.getenv(env_var)
         if key:
             return key
-    # Fallback chain: Groq -> Gemini -> OpenRouter
+    # Fallback chain
     return (
         os.getenv("GROQ_API_KEY")
         or os.getenv("GEMINI_API_KEY")
@@ -106,13 +90,14 @@ def resolve_api_key(entry: dict) -> str | None:
 # ------------------------------------------------------------
 
 def run_agent_worker(i: int, entry: dict) -> dict | None:
-    model_name = entry["model"]
-    api_key = resolve_api_key(entry)
+    model_name  = entry["model"]
+    api_key     = resolve_api_key(entry)
+    tick_delay  = entry.get("tick_delay", 2.0)
 
     if not api_key:
         print(
             f"  [SKIP] {model_name}: No API key found.\n"
-            f"  Set GROQ_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY in .env"
+            f"  Set {entry.get('api_key_env', 'GROQ_API_KEY or GEMINI_API_KEY')} in .env"
         )
         return None
 
@@ -135,7 +120,7 @@ def run_agent_worker(i: int, entry: dict) -> dict | None:
         seed=SEED,
         enable_events=ENABLE_EVENTS,
         verbose=VERBOSE,
-        tick_delay=TICK_DELAY_SECONDS,
+        tick_delay=tick_delay,
     )
 
     print(f"  [{model_name}] Done in {result['elapsed_seconds']}s | Errors: {result['agent_errors']}")
@@ -147,30 +132,39 @@ def run_agent_worker(i: int, entry: dict) -> dict | None:
 # ------------------------------------------------------------
 
 if __name__ == "__main__":
+    # Detect which models have keys available
+    available = []
+    for entry in MODELS:
+        if resolve_api_key(entry):
+            available.append(entry)
+        else:
+            print(f"  [SKIP] {entry['model']}: {entry.get('api_key_env')} not set in .env")
+
+    if not available:
+        print("\nERROR: No API keys found. Set GROQ_API_KEY and/or GEMINI_API_KEY in .env")
+        exit(1)
+
     print()
     print("=" * 60)
     print("  ai-datacenter-sim  |  Benchmark")
     print("=" * 60)
-    print(f"  Models     : {len(MODELS)}")
+    print(f"  Models     : {len(available)} active")
     print(f"  Ticks      : {TICKS}")
     print(f"  Seed       : {SEED}")
-    print(f"  Events     : {ENABLE_EVENTS}")
+    print(f"  Events     : EXTREME (cascading failures enabled)")
     print(f"  Timeout    : {TIMEOUT_SECONDS}s per call")
-    print(f"  Tick delay : {TICK_DELAY_SECONDS}s")
-    mode = "PARALLEL" if len(MODELS) > 1 else "SINGLE"
+    mode = "PARALLEL" if len(available) > 1 else "SINGLE"
     print(f"  Mode       : {mode}")
+    for e in available:
+        print(f"    - {e['model']} (delay: {e.get('tick_delay', 2.0)}s/tick)")
     print("=" * 60)
-
-    if not MODELS:
-        print("ERROR: No models defined in MODELS list.")
-        exit(1)
 
     results = []
 
-    with ThreadPoolExecutor(max_workers=len(MODELS)) as pool:
+    with ThreadPoolExecutor(max_workers=len(available)) as pool:
         futures = {
             pool.submit(run_agent_worker, i, entry): entry
-            for i, entry in enumerate(MODELS, start=1)
+            for i, entry in enumerate(available, start=1)
         }
         for future in as_completed(futures):
             result = future.result()
@@ -185,7 +179,7 @@ if __name__ == "__main__":
 
     print_leaderboard(results)
 
-    summary_path = export_csv(results)
+    summary_path   = export_csv(results)
     tick_log_paths = export_tick_logs(results)
 
     print()
